@@ -4,8 +4,10 @@
 #include <stdlib.h>
 #include <string.h>
 #include "stringconversion.h"
+#include <ctype.h>
 
 #define ROM_LENGTH 256
+#define INST_LENGTH 128
 #define LABEL_LENGTH 64
 #define LABELS_SIZE 128
 
@@ -20,11 +22,17 @@
   (byte & 0x02 ? '1' : '0'), \
   (byte & 0x01 ? '1' : '0') 
 
-unsigned char rom[ROM_LENGTH];
+char** rom[ROM_LENGTH];
 unsigned int rp = 0;
 
+int complexi[ROM_LENGTH];
+unsigned int cp = 0;
+
+int label_loc[ROM_LENGTH];
+unsigned int llp = 0;
+
 struct label {
-  char name[LABEL_LENGTH];
+  char* name;
   unsigned char rp;
 };
 
@@ -45,115 +53,100 @@ unsigned char translate_value(char* value) {
   }
 }
 
-unsigned char translate_operator(char* operator, char* operand_a, char* operand_b) {
-  unsigned char out = 0;
+unsigned int find_label(char* lbl) {
+  for(int i = 0; i < lp; i++) {
+    if(strcmp(labels[i].name, lbl) == 0) {
+#ifdef debug
+      printf("label: %s %d\n", lbl, labels[i].rp);
+#endif
+      return labels[i].rp;
+    }
+  }
+  fprintf(stderr, "couldn't find label '%s'\n", lbl);
+  exit(1);
+}
 
-  if(strcmp(operator, "stu") == 0) {
-    out = 0xC0;
-#ifdef debug
-    printf("0x%02X 0x%02X 0x%02X\n", out, translate_value(operand_a) << 4, translate_value(operand_b));
-#endif
-    out = out | (translate_value(operand_a) << 4);
-    out = out | translate_value(operand_b);
+unsigned char parse_operator(char* op) {
+  if(strcmp(op, "stu") == 0) {
+    return 0xC0;
   }
-  else if(strcmp(operator, "stl") == 0) {
-    out = 0x80;
-#ifdef debug
-    printf("0x%02X 0x%02X 0x%02X\n", out, translate_value(operand_a) << 4, translate_value(operand_b));
-#endif
-    out = out | (translate_value(operand_a) << 4);
-    out = out | translate_value(operand_b);
+  else if(strcmp(op, "stl") == 0) {
+    return 0x80;
   }
-  else if(strcmp(operator, "add") == 0) {
-    out = 0x10;
-#ifdef debug
-    printf("0x%02X 0x%02X 0x%02X\n", out, translate_value(operand_a) << 2, translate_value(operand_b));
-#endif
-    out = out | (translate_value(operand_a) << 2); 
-    out = out | translate_value(operand_b); 
+  else if(strcmp(op, "add") == 0) {
+    return 0x10;
   }
-  else if(strcmp(operator, "sub") == 0) {
-    out = 0x20;
-#ifdef debug
-    printf("0x%02X 0x%02X 0x%02X\n", out, translate_value(operand_a) << 2, translate_value(operand_b));
-#endif
-    out = out | (translate_value(operand_a) << 2); 
-    out = out | translate_value(operand_b); 
+  else if(strcmp(op, "sub") == 0) {
+    return 0x20;
   }
-  else if(strcmp(operator, "mup") == 0) {
-    out = 0x30;
-#ifdef debug
-    printf("0x%02X 0x%02X 0x%02X\n", out, translate_value(operand_a) << 2, translate_value(operand_b));
-#endif
-    out = out | (translate_value(operand_a) << 2); 
-    out = out | translate_value(operand_b); 
+  else if(strcmp(op, "mup") == 0) {
+    return 0x30;
   }
-  else if(strcmp(operator, "beq") == 0) {
-    out = 0x40;
-#ifdef debug
-    printf("0x%02X 0x%02X 0x%02X\n", out, translate_value(operand_a) << 2, translate_value(operand_b));
-#endif
-    out = out | (translate_value(operand_a) << 2); 
-    out = out | translate_value(operand_b); 
+  else if(strcmp(op, "beq") == 0) {
+    return 0x40;
   }
-  else if(strcmp(operator, "slt") == 0) {
-    out = 0x50;
-#ifdef debug
-    printf("0x%02X 0x%02X 0x%02X\n", out, translate_value(operand_a) << 2, translate_value(operand_b));
-#endif
-    out = out | (translate_value(operand_a) << 2); 
-    out = out | translate_value(operand_b); 
+  else if(strcmp(op, "slt") == 0) {
+    return 0x50;
   }
-  else if(strcmp(operator, "and") == 0) {
-    out = 0x60;
-#ifdef debug
-    printf("0x%02X 0x%02X 0x%02X\n", out, translate_value(operand_a) << 2, translate_value(operand_b));
-#endif
-    out = out | (translate_value(operand_a) << 2); 
-    out = out | translate_value(operand_b); 
+  else if(strcmp(op, "and") == 0) {
+    return 0x60;
   }
-  else if(strcmp(operator, "lor") == 0) {
-    out = 0x70;
-#ifdef debug
-    printf("0x%02X 0x%02X 0x%02X\n", out, translate_value(operand_a) << 2, translate_value(operand_b));
-#endif
-    out = out | (translate_value(operand_a) << 2); 
-    out = out | translate_value(operand_b); 
+  else if(strcmp(op, "lor") == 0) {
+    return 0x70;
   }
-  else if(strcmp(operator, "out") == 0) {
-    out = 0x00;
-#ifdef debug
-    printf("0x%02X 0x%02X\n", out, translate_value(operand_a));
-#endif
-    out = out | translate_value(operand_a); 
+  else if(strcmp(op, "out") == 0) {
+    return 0x00;
   }
-  else if(strcmp(operator, "pus") == 0) {
-    out = 0x04;
-#ifdef debug
-    printf("0x%02X 0x%02X\n", out, translate_value(operand_a));
-#endif
-    out = out | translate_value(operand_a); 
+  else if(strcmp(op, "pus") == 0) {
+    return 0x04;
   }
-  else if(strcmp(operator, "pop") == 0) {
-    out = 0x08;
-#ifdef debug
-    printf("0x%02X 0x%02X\n", out, translate_value(operand_a));
-#endif
-    out = out | translate_value(operand_a); 
+  else if(strcmp(op, "pop") == 0) {
+    return 0x08;
   }
-  else if(strcmp(operator, "jmp") == 0) {
-    out = 0x0C;
-#ifdef debug
-    printf("0x%02X 0x%02X\n", out, translate_value(operand_a));
-#endif
-  out = out | translate_value(operand_a); 
+  else if(strcmp(op, "jmp") == 0) {
+    return 0x0C;
   }
   else {
-    fprintf(stderr, "unrecognized operator %s\n", operator);
+    fprintf(stderr, "unrecognized operator '%s'\n", op);
     exit(1);
+  }
+}
+
+unsigned char encode_instruction(unsigned char op, unsigned char op1, unsigned char op2) {
+  unsigned char out = op;
+  switch (op) {
+    case 0xC0:
+    case 0x80:
+      out = out | (op1 << 4);
+      out = out | op2;
+      break;
+    case 0x10:
+    case 0x20:
+    case 0x30:
+    case 0x40:
+    case 0x50:
+    case 0x60:
+    case 0x70:
+      out = out | (op1 << 2);
+      out = out | op2;
+      break;
+    case 0x00:
+    case 0x04:
+    case 0x08:
+    case 0x0C:
+      out = out | op1;
+      break;
   }
 
   return out;
+}
+
+unsigned char parse_instruction(char* inst[3]) {
+  unsigned char op = parse_operator(inst[0]);
+  unsigned char op1 = translate_value(inst[1]);
+  unsigned char op2 = translate_value(inst[2]);
+
+  return encode_instruction(op, op1, op2);
 }
 
 int get_word(char** word_ptr, char** line) {
@@ -166,39 +159,141 @@ int get_word(char** word_ptr, char** line) {
     *((*word_ptr) + i) = *(*line)++;
     i++;
   }
+  *((*word_ptr) + i) = '\0';
   (*line)++;
+
+#ifdef debug
+  printf("%s\n", *word_ptr);
+#endif
 
   return i;
 }
 
-int parse(unsigned char* ins, char* line) {
-  char* ptr = line;
-  int is_label = false;
-  char* operator = malloc(LABEL_LENGTH * sizeof(char));
-  memset(operator, 0, LABEL_LENGTH);
-  char* operand_a = malloc(LABEL_LENGTH * sizeof(char));
-  memset(operand_a, 0, LABEL_LENGTH);
-  char* operand_b = malloc(LABEL_LENGTH * sizeof(char));
-  memset(operand_b, 0, LABEL_LENGTH);
-  
-  get_word(&operator, &ptr);
-  
-  get_word(&operand_a, &ptr);
-  get_word(&operand_b, &ptr);
+
+int create_label(char* line) {
+  struct label lbl;
+  lbl.name = malloc(LABEL_LENGTH * sizeof(char));
+  *lbl.name = 'a';
+  int i = 0;
+
+  lbl.rp = rp;
+  while(isalpha(line[i])) {
+    lbl.name[i] = line[i];
+    i++;
+  }
+  lbl.name[i] = '\0';
 
 #ifdef debug
-  printf("%s %s %s\n", operator, operand_a, operand_b);
+    printf("lbl: %s %d\n", lbl.name, lbl.rp);
 #endif
-  *ins = translate_operator(operator, operand_a, operand_b);
-  
-  free(operator);
-  free(operand_a);
-  free(operand_b);
 
-  rp++;
+  labels[lp++] = lbl;
+
+  return lbl.rp;
+}
+
+int complex_inst(char* inst[3], unsigned int p) {
+  if(strcmp(inst[0], "sto") == 0) {
+    unsigned char op = translate_value(inst[2]);
+    strcpy(rom[p][0], "stu");
+    strcpy(rom[p][1], inst[1]);
+    sprintf(rom[p][2], "0x%02X", op >> 4);
+    strcpy(rom[p + 1][0], "stl");
+    strcpy(rom[p + 1][1], inst[1]);
+    sprintf(rom[p + 1][2], "0x%02X", op & 0x0f);
+  }
+  else {
+    return 0;
+  }
+
+  return 1;
+}
+
+int split_words(char* inst[3], char* line) {
+
+  for(int i = 0; i < 3; i++) {
+    get_word(&inst[i], &line);
+  } 
+
+#ifdef debug
+  printf("%s %s %s\n", inst[0], inst[1], inst[2]);
+#endif
+
   return 0;
 }
 
+
+int is_complex(char* op) {
+  int ops = 0;
+  if(strcmp("sto", op) == 0) {
+    return 2;
+  } 
+
+  return 0;
+}
+
+void parse_input(char* line) {
+  int ops = 0;
+  if(*line == ':') {
+    create_label(line + 1);
+    return;
+  } 
+  char** inst;
+  inst = malloc(3 * sizeof(char*));
+  for(int i = 0; i < 3; i++) {
+    inst[i] = malloc(LABEL_LENGTH * sizeof(char));
+  }
+  split_words(inst, line);
+
+  if(ops = is_complex(inst[0])) {
+    complexi[cp++] = rp;
+    for(int n = 1; n < ops; n++) {
+      rom[rp + n] = malloc(3 * sizeof(char*));
+      for(int i = 0; i < 3; i++) {
+        rom[rp + n][i] = malloc(LABEL_LENGTH * sizeof(char));
+      }
+    }
+
+  } else {
+    ops = 1;
+  }
+
+  if(*inst[1] == ':' || *inst[2] == ':') {
+    label_loc[llp++] = rp;
+  }
+
+  rom[rp] = inst;
+  rp += ops;
+
+#ifdef debug
+  printf("%d: %s %s %s\n", rp - ops, rom[rp - ops][0], rom[rp - ops][1], rom[rp - ops][2]);
+#endif
+}
+
+void replace_labels() {
+  unsigned int p, p2;
+  for(int i = 0; i < llp; i++) {
+    p = label_loc[i];
+
+    if(*rom[p][1] == ':') {
+      p2 = find_label(rom[p][1] + 1);
+      sprintf(rom[p][1], "0x%02X", p2);
+    }
+    if(*rom[p][2] == ':') {
+      p2 = find_label(rom[p][2] + 1);
+      sprintf(rom[p][2], "0x%02X", p2);
+    }
+  }
+}
+
+
+void unpack_complex() {
+  int p;
+  for(int i = 0; i < cp; i++) {
+    int p = complexi[i];
+    complex_inst(rom[p], p);
+  }
+}
 
 int main(int argc, char* argv[]) {
   char* line = malloc(256 * sizeof(char));
@@ -209,10 +304,32 @@ int main(int argc, char* argv[]) {
     if(*line == '\n') {
       continue;
     }
-    if(parse(&ins, line) == -1) {
-      continue;
-    }
-    printf(BYTE_TO_BINARY_PATTERN"\n", BYTE_TO_BINARY(ins));
+    parse_input(line);
   }
   free(line);
+#ifdef debug
+  for(int i = 0; i < rp; i++) {
+    printf("%d: %s %s %s\n", i, rom[i][0], rom[i][1], rom[i][2]);
+  }
+#endif
+  replace_labels();
+#ifdef debug
+  for(int i = 0; i < rp; i++) {
+  printf("%d: %s %s %s\n", i, rom[i][0], rom[i][1], rom[i][2]);
+  }
+#endif
+  unpack_complex();
+
+  for(int i = 0; i < rp; i++) {
+#ifdef debug
+  printf("%d: %s %s %s\n", i, rom[i][0], rom[i][1], rom[i][2]);
+#endif
+    ins = parse_instruction(rom[i]);
+    printf(BYTE_TO_BINARY_PATTERN"\n", BYTE_TO_BINARY(ins));
+    for(int n = 0; n < 3; n++) {
+      free(rom[i][n]);
+    }
+    free(rom[i]);
+  }
 }
+
