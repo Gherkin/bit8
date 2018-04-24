@@ -39,6 +39,9 @@ unsigned char translate_value(char* value) {
     else if(*(value + 1) == 'b') {
       return batoi(value + 2);
     }
+    else {
+      return datoi(value + 2);
+    }
   }
 }
 
